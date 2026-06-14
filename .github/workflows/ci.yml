@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Python dependencies
+        run: |
+          pip install z3-solver pytest
+
+      - name: Set up Lean 4
+        uses: leanprover/lean4-action@v1
+
+      - name: Run all tests
+        run: python -m pytest tests/ -v
+
+      - name: Verify Lean compilation
+        run: |
+          lean Lean/Policy.lean
+          lean Lean/Verify.lean
+
+      - name: Run demo scripts
+        run: |
+          python demo_tahoe.py
+          python demo_deletion.py
