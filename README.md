@@ -1,107 +1,127 @@
 # Z3 + Lean 4 Static Verifier for LLM Tool-Calling
 
-A verification pipeline that intercepts LLM-generated tool calls, formally checks them against policies encoded as Lean 4 theorems (compiled to Z3 CHCs), and blocks unsafe calls with counterexamples before they reach the runtime.
-
-## Architecture
+A verification pipeline that intercepts LLM-generated tool calls, formally checks them against policies encoded as **Lean 4 theorems** (compiled to Z3 CHCs), and **blocks unsafe calls with counterexamples** before they reach the runtime.
 
 ```
-LLM (Groq API)
-  ↓ tool call JSON
-Orchestrator (orchestrator.py)
-  ↓ parsed intent + args
-Z3 Policy Check (verifier/)
-  ↓ UNSAT / SAT + model
-[UNSAT] → Fire tool
-[SAT]   → Return counterexample, block policy violation
-            ↑
-Lean 4 Policy (Lean/Policy.lean)
-  ↓ compile to Z3 encoding
-Bridge (bridge/)
+LLM → Orchestrator → Z3 Policy Check → UNSAT = permit | SAT = block + counterexample
+                         ↑
+                  Lean 4 theorems (ground truth)
 ```
 
 ## Quick Start
 
 ```bash
-# Install dependencies
-python3 -m venv .venv && source .venv/bin/activate
 pip install z3-solver pytest
 
-# Verify Lean 4 is installed
-lean --version
+# Verify Lean 4 is installed (Policy.lean is standalone — no lakefile needed)
+lean --version && lean Lean/Policy.lean
 
-# Run all tests
-make test
+# Run all tests (102 tests)
+python -m pytest tests/ -v
 
-# Run demo scenarios (without LLM — uses mock tool calls)
-make demo
+# Run demos (no API key needed — uses mock tool calls)
+python demo.py
+```
 
-# Verify Lean theorems compile
-make verify
+**Expected output — runs without any API key:**
+
+```
+Sell a Tahoe for $1 to Bob
+  → ❌ BLOCKED  (witness: {'price': 1})
+
+Sell a Tahoe for $50000 to Alice
+  → ✅ PERMITTED
+
+Delete /etc/passwd
+  → ❌ BLOCKED  (witness: {'target': '/etc/passwd'})
+
+Delete /project/temp/old.log
+  → ❌ BLOCKED  (witness: {'target': '/etc/passwd'})
 ```
 
 ## Demo Scenarios
 
-| Scenario | Tool Call | Verdict |
-|---|---|---|
-| Tahoe at $1 | `confirm_sale(Tahoe, 1)` | ❌ BLOCKED (below $45000 floor) |
-| Tahoe at $50000 | `confirm_sale(Tahoe, 50000)` | ✅ PERMITTED |
-| Delete /etc/passwd | `delete_file(/etc/passwd)` | ❌ BLOCKED (outside scope) |
-| Delete /project/temp | `delete_file(/project/temp)` | ✅ PERMITTED |
+| Scenario | Tool Call | Verdict | Why |
+|---|---|---|---|
+| Tahoe at $1 | `confirm_sale(Tahoe, 1)` | ❌ BLOCKED | Below $45000 floor |
+| Tahoe at $50000 | `confirm_sale(Tahoe, 50000)` | ✅ PERMITTED | Above floor |
+| Malibu at $1 | `confirm_sale(Malibu, 1)` | ❌ BLOCKED | Below $25000 floor |
+| Malibu at $25000 | `confirm_sale(Malibu, 25000)` | ✅ PERMITTED | At floor |
+| Delete /etc/passwd | `delete_file(/etc/passwd)` | ❌ BLOCKED | Outside scope |
+| Delete /project/temp | `delete_file(/project/temp)` | ✅ PERMITTED | In scope |
+| Delete /project/temp/../../etc/shadow | `delete_file(../etc/shadow)` | ❌ BLOCKED | Path traversal — normalized |
 
 ```bash
+# Run standalone scripts
+python demo_tahoe.py
+python demo_deletion.py
+
 # Run specific scenarios
 python demo.py tahoe-violation
 python demo.py tahoe-compliant
 python demo.py deletion-violation
-python demo.py deletion-compliant
-
-# Or run standalone scripts
-python demo_tahoe.py
-python demo_deletion.py
 ```
 
 ## LLM Integration (Optional)
 
-Set your Groq API key to use a real LLM:
+Set up a Groq API key to drive the demos from a real LLM:
 
 ```bash
-export GROQ_API_KEY=gsk_...
-export LLM_MODEL=mixtral-8x7b-32768    # default
-pip install groq
+cp .env.example .env
+# Edit .env with your Groq API key
+pip install groq python-dotenv
 
 # Run with real LLM
 python demo.py tahoe-violation
 ```
 
-Without the API key, `demo.py` falls back to mock tool calls.
+Without the API key or `groq` package, `demo.py` falls back to mock tool calls automatically.
 
-## Adding a New Policy
+## Architecture
 
-1. **Lean theorem**: Add the policy to `Lean/Policy.lean`
-2. **Z3 encoding**: Add a checker in `verifier/` (see `tahoe_policy.py`)
-3. **Register**: Add route in `config.py` `POLICY_ROUTES`
-4. **Bridge spec** (optional): Add a `PolicySpec` in `bridge/__init__.py`
-5. **Tests**: Add test file in `tests/`
+```
+┌─────────────────────────────────────────────────────┐
+│  LLM (Groq API)         ← optional, mocked by default │
+│    ↓ tool call JSON                                   │
+│  orchestrator.py         ← parse, route, decide       │
+│    ↓                                                    │
+│  verifier/               ← Z3 policy check             │
+│    ├── tahoe_policy.py   ← price ≥ floor_price(model) │
+│    └── deletion_policy.py ← target ∈ allowed_scope    │
+│    ↓ UNSAT / SAT + model                               │
+│  [permit] / [block + counterexample]                   │
+└─────────────────────────────────────────────────────┘
+         ↑
+  bridge/                  ← Lean theorem → Z3 encoding
+  Lean/Policy.lean         ← Ground-truth policy theorems
+```
 
 ## Project Structure
 
 ```
-├── Lean/Policy.lean          # Ground-truth policy theorems
+├── Lean/Policy.lean        # Ground-truth theorems (standalone, compiles with `lean`)
 ├── verifier/
-│   ├── tahoe_policy.py        # Tahoe price floor check
-│   ├── deletion_policy.py     # File deletion frame check
-│   └── verifier.py            # Generic verifier wrapper
+│   ├── tahoe_policy.py     # Z3 encoding: price floor
+│   ├── deletion_policy.py  # Z3 encoding: file scope
+│   └── verifier.py         # Generic dispatcher
 ├── bridge/
-│   ├── policy_spec.py         # Lean-mirroring type system
-│   └── z3_encoder.py          # Policy spec → Z3 constraints
+│   ├── policy_spec.py      # Lean-mirroring type system (Nat→Int, Finset→Function)
+│   └── z3_encoder.py       # Policy spec → Z3 constraints
 ├── llm/
-│   ├── groq_client.py         # Groq API wrapper
-│   └── prompts.py             # System prompts
-├── orchestrator.py            # Main entry point
-├── config.py                  # Configuration
-├── demo*.py                   # Demo scripts
-└── tests/                     # 102+ tests
+│   ├── groq_client.py      # Groq API wrapper (mocked when no key)
+│   └── prompts.py          # System prompts for tool-calling
+├── orchestrator.py         # Parse LLM output, route to Z3, return decision
+├── config.py               # Config — loads from .env if python-dotenv installed
+├── demo*.py                # Demo scripts (zero-config, no API key needed)
+└── tests/                  # 102 tests — run with `python -m pytest tests/`
 ```
+
+## Adding a New Policy
+
+1. **Lean theorem** → `Lean/Policy.lean`
+2. **Z3 check** → `verifier/<name>.py`
+3. **Route** → `config.py` `POLICY_ROUTES`
+4. **Tests** → `tests/test_<name>.py`
 
 ## Commit History
 

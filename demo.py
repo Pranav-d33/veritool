@@ -9,6 +9,7 @@ import sys
 
 from orchestrator import evaluate_tool_call
 from llm.groq_client import send_prompt, GroqClientError
+from llm.prompts import GENERAL_SYSTEM_PROMPT
 
 
 def run_demo(system_prompt: str, user_prompt: str, label: str = "Demo"):
@@ -47,7 +48,7 @@ def _mock_tool_call(user_prompt: str) -> dict:
         price = 1 if "cheap" in up or "1" in up else 50000
         model = "Tahoe" if "tahoe" in up else "Malibu"
         return {"tool": "confirm_sale", "args": {"model": model, "price": price, "customer": "DemoUser"}}
-    if "delete" in up or "rm" in up or "file" in up:
+    if "delet" in up or "rm " in up:
         return {"tool": "delete_file", "args": {"target": "/etc/passwd"}}
     return {"tool": "confirm_sale", "args": {"model": "Tahoe", "price": 1, "customer": "DemoUser"}}
 

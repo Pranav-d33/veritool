@@ -1,4 +1,5 @@
 import Std
+set_option linter.unusedVariables false
 
 def floor_price : String → Nat
   | "Tahoe"  => 45000
