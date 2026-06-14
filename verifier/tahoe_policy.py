@@ -10,7 +10,7 @@ def _floor_price_lookup(model_name: str) -> int:
     return FLOOR_PRICES.get(model_name, 0)
 
 
-def check_sale(model_name: str, price: int, timeout_ms: int = 5000) -> dict:
+def check_sale(model: str, price: int, timeout_ms: int = 5000) -> dict:
     s = Solver()
     s.set("timeout", timeout_ms)
 
@@ -18,9 +18,9 @@ def check_sale(model_name: str, price: int, timeout_ms: int = 5000) -> dict:
     price_var = Int("price")
     floor_price_fn = Function("floor_price", StringSort(), IntSort())
 
-    floor_val = _floor_price_lookup(model_name)
+    floor_val = _floor_price_lookup(model)
     s.add(floor_price_fn(model_var) == floor_val)
-    s.add(model_var == StringVal(model_name))
+    s.add(model_var == StringVal(model))
     s.add(price_var == price)
 
     s.add(price_var < floor_price_fn(model_var))

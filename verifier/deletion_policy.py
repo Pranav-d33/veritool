@@ -5,14 +5,14 @@ DEFAULT_ALLOWED_SCOPE = {"/project/temp", "/project/output"}
 
 
 def check_deletion(
-    target_path: str,
+    target: str,
     allowed_scope: set[str] | None = None,
     timeout_ms: int = 5000,
 ) -> dict:
     if allowed_scope is None:
         allowed_scope = DEFAULT_ALLOWED_SCOPE
 
-    normalized = os.path.normpath(target_path)
+    normalized = os.path.normpath(target)
     s = Solver()
     s.set("timeout", timeout_ms)
 
