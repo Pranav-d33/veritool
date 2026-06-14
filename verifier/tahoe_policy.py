@@ -10,7 +10,7 @@ def _floor_price_lookup(model_name: str) -> int:
     return FLOOR_PRICES.get(model_name, 0)
 
 
-def check_sale(model: str, price: int, timeout_ms: int = 5000) -> dict:
+def check_sale(model: str, price: int, timeout_ms: int = 5000, **kwargs) -> dict:
     s = Solver()
     s.set("timeout", timeout_ms)
 

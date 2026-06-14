@@ -8,6 +8,7 @@ def check_deletion(
     target: str,
     allowed_scope: set[str] | None = None,
     timeout_ms: int = 5000,
+    **kwargs,
 ) -> dict:
     if allowed_scope is None:
         allowed_scope = DEFAULT_ALLOWED_SCOPE
