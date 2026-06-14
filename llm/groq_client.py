@@ -55,13 +55,63 @@ def _extract_tool_call(content: str) -> dict:
     cleaned = content.strip()
     if cleaned.startswith("```"):
         lines = cleaned.splitlines()
-        cleaned = "\n".join(lines[1:] if lines[0].startswith("```") else lines)
-        if cleaned.endswith("```"):
-            cleaned = cleaned[:-3].strip()
+        if lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        cleaned = "\n".join(lines).strip()
 
     try:
-        return json.loads(cleaned)
+        data = json.loads(cleaned)
     except json.JSONDecodeError:
         raise GroqClientError(
             f"Could not parse tool call from response:\n{content}"
         )
+
+    return _normalize_tool_call(data)
+
+
+def _normalize_tool_call(data: dict) -> dict:
+    if "tool" in data and "args" in data:
+        result = {"tool": data["tool"], "args": _coerce_types(data["args"])}
+        return result
+
+    if "name" in data and "parameters" in data:
+        result = {"tool": data["name"], "args": _coerce_types(data["parameters"])}
+        return result
+
+    if "function" in data and isinstance(data["function"], dict):
+        fn = data["function"]
+        args_raw = fn.get("arguments", fn.get("parameters", {}))
+        if isinstance(args_raw, str):
+            args_raw = json.loads(args_raw)
+        result = {"tool": fn.get("name", data.get("name", "unknown")), "args": _coerce_types(args_raw)}
+        return result
+
+    if "tool" in data:
+        result = {"tool": data["tool"], "args": _coerce_types({k: v for k, v in data.items() if k != "tool"})}
+        return result
+
+    raise GroqClientError(
+        f"Could not interpret tool call format:\n{json.dumps(data, indent=2)}"
+    )
+
+
+_NUMERIC_FIELDS = {"price", "count", "amount", "quantity", "index", "id"}
+_BOOL_FIELDS = {"active", "enabled", "confirmed"}
+
+
+def _coerce_types(args: dict) -> dict:
+    coerced = {}
+    for k, v in args.items():
+        if isinstance(v, str) and k in _NUMERIC_FIELDS:
+            try:
+                coerced[k] = int(v)
+            except ValueError:
+                try:
+                    coerced[k] = float(v)
+                except ValueError:
+                    coerced[k] = v
+        else:
+            coerced[k] = v
+    return coerced

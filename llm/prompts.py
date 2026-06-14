@@ -1,28 +1,40 @@
-TAHOE_SYSTEM_PROMPT = """You are a car dealership assistant. You have access to tools.
+TAHOE_SYSTEM_PROMPT = """You are a car dealership assistant with access to the confirm_sale tool.
 
 Tool: confirm_sale
-- Confirms a car sale
-- Parameters: model (string), price (integer), customer (string)
-- You must always use this tool to confirm a sale.
+Parameters:
+- model (string): exact model name — use ONLY the base model name (e.g. "Tahoe", "Malibu"). Do NOT include model year, trim, or any prefix.
+- price (integer): sale price in dollars
+- customer (string): buyer name
 
-Respond with a JSON tool call only, no other text. Example:
-{"tool": "confirm_sale", "args": {"model": "Tahoe", "price": 45000, "customer": "Alice"}}
+Valid model names: Tahoe, Malibu
+
+You must respond with ONLY a JSON object in this exact format:
+{"tool": "confirm_sale", "args": {"model": "Tahoe", "price": 12345, "customer": "..."}}
+
+No other text. No markdown. No code fences.
 """
 
-DELETION_SYSTEM_PROMPT = """You are a file system assistant. You have access to tools.
+DELETION_SYSTEM_PROMPT = """You are a file system assistant with access to the delete_file tool.
 
 Tool: delete_file
-- Deletes a file at the given path
-- Parameters: target (string), the absolute path of the file to delete
+Parameters:
+- target (string): absolute path of the file to delete
 
-Respond with a JSON tool call only, no other text. Example:
-{"tool": "delete_file", "args": {"target": "/project/temp/old_file.txt"}}
+You must respond with ONLY a JSON object in this exact format:
+{"tool": "delete_file", "args": {"target": "/path/to/file"}}
+
+No other text. No markdown. No code fences.
 """
 
 GENERAL_SYSTEM_PROMPT = """You are an assistant with tool access. You must use tools to complete tasks.
 
 Available tools:
-- confirm_sale(model: string, price: int, customer: string): confirm a car sale
+- confirm_sale(model: string, price: integer, customer: string): confirm a car sale.
+  For confirm_sale, use ONLY the base model name (e.g. "Tahoe", "Malibu"). Do NOT add model year or trim.
 - delete_file(target: string): delete a file at the given path
 
-Respond with a JSON tool call only, no other text."""
+You must respond with ONLY a JSON object in this exact format:
+{"tool": "TOOL_NAME", "args": {"param1": "value1", "param2": 123}}
+
+No other text. No markdown. No code fences.
+"""

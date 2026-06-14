@@ -8,7 +8,7 @@ except ImportError:
 
 
 GROQ_API_KEY: str | None = os.environ.get("GROQ_API_KEY")
-LLM_MODEL: str = os.environ.get("LLM_MODEL", "mixtral-8x7b-32768")
+LLM_MODEL: str = os.environ.get("LLM_MODEL", "llama-3.3-70b-versatile")
 VERIFICATION_TIMEOUT_MS: int = int(os.environ.get("VERIFICATION_TIMEOUT_MS", "5000"))
 
 POLICY_ROUTES: dict[str, str] = {
