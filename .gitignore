@@ -1,6 +1,38 @@
+# Python
 __pycache__/
-*.pyc
-.env
+*.py[cod]
+*.egg-info/
+dist/
+build/
+*.egg
+.venv/
+venv/
+env/
+
+# Lean 4
 Lean/*.olean
 Lean/.lake/
-.venv/
+lake-manifest.json
+lakefile.lean
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Environment
+.env
+.env.local
+*.key
+
+# Testing
+.pytest_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Logs
+*.log
