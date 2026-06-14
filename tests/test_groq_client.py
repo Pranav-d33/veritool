@@ -41,6 +41,25 @@ class TestExtractToolCall:
         result = _extract_tool_call(raw)
         assert result["tool"] == "confirm_sale"
 
+    def test_extract_function_calling_format(self):
+        raw = '{"name": "confirm_sale", "parameters": {"model": "Tahoe", "price": 1, "customer": "Bob"}}'
+        result = _extract_tool_call(raw)
+        assert result["tool"] == "confirm_sale"
+        assert result["args"]["price"] == 1
+
+    def test_extract_nested_function_format(self):
+        raw = '{"function": {"name": "delete_file", "arguments": "{\\"target\\": \\"/etc/passwd\\"}"}}'
+        result = _extract_tool_call(raw)
+        assert result["tool"] == "delete_file"
+        assert result["args"]["target"] == "/etc/passwd"
+
+    def test_extract_coerces_price_string_to_int(self):
+        raw = '{"tool": "confirm_sale", "args": {"model": "Tahoe", "price": "1", "customer": "Bob"}}'
+        result = _extract_tool_call(raw)
+        assert result["tool"] == "confirm_sale"
+        assert result["args"]["price"] == 1
+        assert isinstance(result["args"]["price"], int)
+
 
 class TestGroqClientSendPrompt:
     def test_send_prompt_mocked(self):

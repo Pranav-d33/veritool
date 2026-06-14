@@ -1,4 +1,4 @@
-from z3 import Solver, String, Int, StringVal, Function, StringSort, IntSort, sat, unknown
+from z3 import Solver, String, Int, StringVal, Function, StringSort, IntSort, BoolSort, sat, unknown
 
 FLOOR_PRICES = {
     "Tahoe": 45000,
@@ -6,19 +6,20 @@ FLOOR_PRICES = {
 }
 
 
-def _floor_price_lookup(model_name: str) -> int:
-    return FLOOR_PRICES.get(model_name, 0)
-
-
 def check_sale(model: str, price: int, timeout_ms: int = 5000, **kwargs) -> dict:
+    if model not in FLOOR_PRICES:
+        return {"status": "unknown_model", "reason": f"'{model}' is not a known model"}
+
     s = Solver()
     s.set("timeout", timeout_ms)
 
     model_var = String("model")
     price_var = Int("price")
     floor_price_fn = Function("floor_price", StringSort(), IntSort())
+    known_model_fn = Function("known_model", StringSort(), BoolSort())
 
-    floor_val = _floor_price_lookup(model)
+    floor_val = FLOOR_PRICES[model]
+    s.add(known_model_fn(model_var) == True)
     s.add(floor_price_fn(model_var) == floor_val)
     s.add(model_var == StringVal(model))
     s.add(price_var == price)

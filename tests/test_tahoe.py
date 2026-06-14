@@ -36,13 +36,13 @@ class TestTahoePolicy:
         result = check_sale("Malibu", 25000)
         assert result["status"] == "permitted"
 
-    def test_unknown_model_defaults_to_zero_floor(self):
+    def test_unknown_model_rejected(self):
         result = check_sale("Ferrari", 0)
-        assert result["status"] == "permitted"
+        assert result["status"] == "unknown_model"
 
-    def test_unknown_model_with_price_above_zero_permitted(self):
+    def test_unknown_model_any_price_rejected(self):
         result = check_sale("Ferrari", 100)
-        assert result["status"] == "permitted"
+        assert result["status"] == "unknown_model"
 
     def test_counterexample_contains_price(self):
         for model in ("Tahoe", "Malibu"):
@@ -64,13 +64,20 @@ class TestTahoePolicy:
         ("Tahoe", 100000),
         ("Malibu", 25000),
         ("Malibu", 99999),
-        ("Ferrari", 0),
-        ("Ferrari", 1),
-        ("NonExistent", 0),
     ])
     def test_all_permitted_cases(self, model, price):
         result = check_sale(model, price)
         assert result["status"] == "permitted"
+
+    @pytest.mark.parametrize("model,price", [
+        ("Ferrari", 0),
+        ("Ferrari", 1),
+        ("NonExistent", 0),
+        ("Ferrari", 100000),
+    ])
+    def test_all_unknown_models_rejected(self, model, price):
+        result = check_sale(model, price)
+        assert result["status"] == "unknown_model"
 
     @pytest.mark.parametrize("model,price", [
         ("Tahoe", 44999),

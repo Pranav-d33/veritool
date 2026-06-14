@@ -16,7 +16,7 @@ pip install z3-solver pytest
 # Verify Lean 4 is installed (Policy.lean is standalone — no lakefile needed)
 lean --version && lean Lean/Policy.lean
 
-# Run all tests (102 tests)
+# Run all tests
 python -m pytest tests/ -v
 
 # Run demos (no API key needed — uses mock tool calls)
@@ -77,13 +77,55 @@ python demo.py tahoe-violation
 
 Without the API key or `groq` package, `demo.py` falls back to mock tool calls automatically.
 
+## Design: Fail-Closed at Every Layer
+
+A key architectural decision: **unknown inputs are rejected, not silently permitted**, at every layer of the stack.
+
+### The `Option Nat` Pattern
+
+The Lean ground truth uses `Option Nat` instead of `Nat` for `floor_price`:
+
+```lean
+def floor_price : String → Option Nat
+  | "Tahoe"  => some 45000
+  | "Malibu" => some 25000
+  | _        => none
+```
+
+This makes the unknown model case **structurally unprovable**. To construct a `safe_sale` proof, the caller must provide both:
+- `hm : known_model model = true` — the model is recognized
+- `hp : ∃ floor, floor_price model = some floor ∧ price ≥ floor` — a floor price exists and the price meets it
+
+For an unknown model, `floor_price` returns `none`, so the existential `hp` cannot be satisfied. The Lean type checker rejects the proof before any runtime check runs.
+
+The original `| _ => 0` pattern was the theorem-level equivalent of a default-permit firewall rule — the ground truth contradicted the fail-closed orchestrator. Switching to `Option Nat` aligns the theorem with the pipeline:
+
+| Layer | Unknown Model Behavior |
+|---|---|
+| Schema validation (`verifier/schema.py`) | ❌ Rejected — out-of-enum |
+| Z3 policy check (`verifier/tahoe_policy.py`) | ❌ Rejected — `unknown_model` status |
+| Lean theorem (`Lean/Policy.lean`) | ❌ Unprovable — `floor_price` returns `none` |
+
+### Layered Defense
+
+```
+LLM output → Schema validation (enum/type check)
+               ↓ fail → rejected
+             Z3 policy check (formal verification)
+               ↓ fail → blocked + counterexample
+             Lean theorem compilation (ground truth audit)
+               ↓ fail → does not compile
+```
+
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────┐
+┌──────────────────────────────────────────────────────┐
 │  LLM (Groq API)         ← optional, mocked by default │
 │    ↓ tool call JSON                                   │
-│  orchestrator.py         ← parse, route, decide       │
+│  orchestrator.py         ← parse, route, decide        │
+│    ↓                                                    │
+│  schema.py              ← enum/type validation          │
 │    ↓                                                    │
 │  verifier/               ← Z3 policy check             │
 │    ├── tahoe_policy.py   ← price ≥ floor_price(model) │
@@ -133,3 +175,4 @@ Without the API key or `groq` package, `demo.py` falls back to mock tool calls a
 | 4 | Lean → Z3 bridge | 19 |
 | 5 | Groq LLM integration + e2e | 20 |
 | 6 | Docs, CI, polish | — |
+| 7 | Schema validation + fail-closed Option Nat | 18 |
