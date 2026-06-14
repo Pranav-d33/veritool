@@ -12,8 +12,8 @@ verify:
 	$(PYTHON) -c "import subprocess; r = subprocess.run(['lean', 'Lean/Invalid.lean'], capture_output=True); assert r.returncode != 0, 'Invalid.lean should fail'; print('Invalid.lean correctly rejected')"
 
 demo:
-	$(PYTHON) demo_tahoe.py
-	$(PYTHON) demo_deletion.py
+	PYTHONPATH="." $(PYTHON) demo_tahoe.py
+	PYTHONPATH="." $(PYTHON) demo_deletion.py
 
 llm-demo:
 	$(PYTHON) demo.py
