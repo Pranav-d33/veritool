@@ -1,0 +1,19 @@
+[project]
+name = "z3-lean-verifier"
+version = "0.1.0"
+description = "Z3 + Lean 4 static verifier for LLM tool-calling"
+requires-python = ">=3.11"
+dependencies = [
+    "z3-solver>=4.13",
+    "groq>=0.12",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+    "pyfakefs>=6",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
