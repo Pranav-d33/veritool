@@ -1,7 +1,7 @@
 [project]
-name = "z3-lean-verifier"
-version = "0.1.0"
-description = "Z3 + Lean 4 static verifier for LLM tool-calling"
+name = "veritool"
+version = "1.0.0"
+description = "VeriTool — Formal verification framework for LLM tool-calling. Z3 + Lean 4."
 requires-python = ">=3.11"
 dependencies = [
     "z3-solver>=4.13",
@@ -12,7 +12,15 @@ dependencies = [
 dev = [
     "pytest>=8",
     "pyfakefs>=6",
+    "streamlit>=1.28",
+    "pandas>=2.0",
 ]
+all = [
+    "veritool[dev]",
+]
+
+[project.scripts]
+veritool = "cli:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

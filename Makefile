@@ -1,9 +1,12 @@
-.PHONY: test verify demo clean
+.PHONY: test verify demo clean install cli dashboard
 
 PYTHON = python3
 PYTEST = PYTHONPATH="." $(PYTHON) -m pytest
 
 test:
+	$(PYTEST) tests/ -v --tb=short
+
+test-all:
 	$(PYTEST) tests/ -v
 
 verify:
@@ -18,7 +21,20 @@ demo:
 llm-demo:
 	$(PYTHON) demo.py
 
+cli:
+	PYTHONPATH="." $(PYTHON) -m cli --help
+
+dashboard:
+	streamlit run dashboard/app.py --server.port=8501
+
+install:
+	pip install -e ".[dev]"
+
 clean:
 	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
 	find . -type f -name '*.pyc' -delete
 	find Lean -type f -name '*.olean' -delete
+
+.PHONY: test-fast
+test-fast:
+	$(PYTEST) tests/ -x -q --tb=short

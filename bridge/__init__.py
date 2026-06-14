@@ -3,6 +3,7 @@ from bridge.z3_encoder import check_policy, compile_policy
 
 TAHOE_SPEC = PolicySpec(
     name="tahoe",
+    _policy_type="tahoe",
     params={"model": StringType, "price": NatType},
     functions=[
         FunctionDef("floor_price", StringType, NatType,
@@ -14,8 +15,10 @@ TAHOE_SPEC = PolicySpec(
 
 DELETION_SPEC = PolicySpec(
     name="deletion",
+    _policy_type="deletion",
     params={"target": StringType},
     violation_expr="Not(in_scope(target))",
+    _allowed_scope=["/project/temp", "/project/output"],
     description="File deletion frame policy requiring target in allowed scope",
 )
 

@@ -1,178 +1,120 @@
-# Z3 + Lean 4 Static Verifier for LLM Tool-Calling
+# VeriTool
 
-A verification pipeline that intercepts LLM-generated tool calls, formally checks them against policies encoded as **Lean 4 theorems** (compiled to Z3 CHCs), and **blocks unsafe calls with counterexamples** before they reach the runtime.
+Formal verification framework for LLM tool-calling. Z3 + Lean 4.
 
 ```
-LLM → Orchestrator → Z3 Policy Check → UNSAT = permit | SAT = block + counterexample
-                         ↑
-                  Lean 4 theorems (ground truth)
+LLM → Interceptor → Z3 Policy Check → UNSAT = permit | SAT = block + counterexample
+                    ↑
+              Auto-generator — NL descriptions → formal specs (Lean + Z3)
 ```
 
-## Quick Start
+## Quick Install
 
 ```bash
 pip install z3-solver pytest
-
-# Verify Lean 4 is installed (Policy.lean is standalone — no lakefile needed)
+pip install -e ".[all]"        # includes dashboard, pandas, streamlit
 lean --version && lean Lean/Policy.lean
-
-# Run all tests
-python -m pytest tests/ -v
-
-# Run demos (no API key needed — uses mock tool calls)
-python demo.py
+veritool --help
 ```
 
-**Expected output — runs without any API key:**
+## CLI Usage
 
 ```
-Sell a Tahoe for $1 to Bob
-  → ❌ BLOCKED  (witness: {'price': 1})
-
-Sell a Tahoe for $50000 to Alice
-  → ✅ PERMITTED
-
-Delete /etc/passwd
-  → ❌ BLOCKED  (witness: {'target': '/etc/passwd'})
-
-Delete /project/temp/old.log
-  → ❌ BLOCKED  (witness: {'target': '/etc/passwd'})
+veritool create "no file named payroll.csv may be deleted"     # NL → formal policy
+veritool check tahoe --model Tahoe --price 45000               # decision for a case
+veritool test tahoe                                            # run round-trip test matrix
+veritool run Tahoe 40000 --verbose                             # unified check+explain
+veritool status                                                # active policies summary
+veritool hot-reload                                            # reload without restart
+veritool rollback tahoe                                        # undo last revision
+veritool verify all                                            # full round-trip sweep
+veritool dashboard                                             # launch Streamlit UI
+veritool wrap "def fn(**kw): ..." --tool-name submit_order     # wrap function as tool
 ```
 
-## Demo Scenarios
-
-| Scenario | Tool Call | Verdict | Why |
-|---|---|---|---|
-| Tahoe at $1 | `confirm_sale(Tahoe, 1)` | ❌ BLOCKED | Below $45000 floor |
-| Tahoe at $50000 | `confirm_sale(Tahoe, 50000)` | ✅ PERMITTED | Above floor |
-| Malibu at $1 | `confirm_sale(Malibu, 1)` | ❌ BLOCKED | Below $25000 floor |
-| Malibu at $25000 | `confirm_sale(Malibu, 25000)` | ✅ PERMITTED | At floor |
-| Delete /etc/passwd | `delete_file(/etc/passwd)` | ❌ BLOCKED | Outside scope |
-| Delete /project/temp | `delete_file(/project/temp)` | ✅ PERMITTED | In scope |
-| Delete /project/temp/../../etc/shadow | `delete_file(../etc/shadow)` | ❌ BLOCKED | Path traversal — normalized |
+## Demo
 
 ```bash
-# Run standalone scripts
-python demo_tahoe.py
-python demo_deletion.py
-
-# Run specific scenarios
-python demo.py tahoe-violation
-python demo.py tahoe-compliant
-python demo.py deletion-violation
+python demo_tahoe.py       # price floor checks
+python demo_deletion.py    # file scope checks
 ```
 
-## LLM Integration (Optional)
+## Supported Policy Types
 
-Set up a Groq API key to drive the demos from a real LLM:
+| Type | Description | Example Violation |
+|---|---|---|
+| `price_floor` | Minimum price per item | `price < floor_price(model)` |
+| `file_access` / `deletion` | Allowed file scope | `¬in_scope(target)` |
+| `sql_safety` | Allowed query patterns | `¬allowed_query_pattern(query)` |
+| `rate_limit` | Max calls per API key | `current_count ≥ max_per_minute(key)` |
+| `role_hours` | Admin action time windows | `role=admin ∧ hour > 22` |
+| `api_access` | Endpoint allowlist | `¬endpoint_allowed(path)` |
+| `generic` | Custom constraints | user-defined |
+
+## Multi-Agent Coordination
+
+```python
+from verifier.coordination_policy import CoordinationVerifier, Invariant
+
+verifier = CoordinationVerifier()
+verifier.add_invariant("seq", Invariant.SEQUENTIAL_ACCESS, resource="db")
+verifier.add_invariant("lock", Invariant.LOCK_REQUIRED, resource="db")
+```
+
+Supported invariants: `SEQUENTIAL_ACCESS`, `LOCK_REQUIRED`, `APPROVAL_REQUIRED`, `MONOTONIC_ACCESS`, `ROLE_BASED_ACCESS`.
+
+## LLM Integration
+
+```python
+from integrations.langchain_interceptor import LangChainVerifier
+from integrations.crewaI_guard import CrewAIVerifier
+from integrations.autogen_middleware import AutoGenMiddleware
+```
+
+All three wrappers intercept tool calls and block violations before runtime.
+
+## Tests
 
 ```bash
-cp .env.example .env
-# Edit .env with your Groq API key
-pip install groq python-dotenv
-
-# Run with real LLM
-python demo.py tahoe-violation
+make test           # all tests
+make test-fast      # stop at first failure
+make verify         # Lean theorem compilation check
+make dashboard      # Streamlit monitoring UI
 ```
 
-Without the API key or `groq` package, `demo.py` falls back to mock tool calls automatically.
-
-## Design: Fail-Closed at Every Layer
-
-A key architectural decision: **unknown inputs are rejected, not silently permitted**, at every layer of the stack.
-
-### The `Option Nat` Pattern
-
-The Lean ground truth uses `Option Nat` instead of `Nat` for `floor_price`:
-
-```lean
-def floor_price : String → Option Nat
-  | "Tahoe"  => some 45000
-  | "Malibu" => some 25000
-  | _        => none
-```
-
-This makes the unknown model case **structurally unprovable**. To construct a `safe_sale` proof, the caller must provide both:
-- `hm : known_model model = true` — the model is recognized
-- `hp : ∃ floor, floor_price model = some floor ∧ price ≥ floor` — a floor price exists and the price meets it
-
-For an unknown model, `floor_price` returns `none`, so the existential `hp` cannot be satisfied. The Lean type checker rejects the proof before any runtime check runs.
-
-The original `| _ => 0` pattern was the theorem-level equivalent of a default-permit firewall rule — the ground truth contradicted the fail-closed orchestrator. Switching to `Option Nat` aligns the theorem with the pipeline:
-
-| Layer | Unknown Model Behavior |
-|---|---|
-| Schema validation (`verifier/schema.py`) | ❌ Rejected — out-of-enum |
-| Z3 policy check (`verifier/tahoe_policy.py`) | ❌ Rejected — `unknown_model` status |
-| Lean theorem (`Lean/Policy.lean`) | ❌ Unprovable — `floor_price` returns `none` |
-
-### Layered Defense
-
-```
-LLM output → Schema validation (enum/type check)
-               ↓ fail → rejected
-             Z3 policy check (formal verification)
-               ↓ fail → blocked + counterexample
-             Lean theorem compilation (ground truth audit)
-               ↓ fail → does not compile
-```
-
-## Architecture
-
-```
-┌──────────────────────────────────────────────────────┐
-│  LLM (Groq API)         ← optional, mocked by default │
-│    ↓ tool call JSON                                   │
-│  orchestrator.py         ← parse, route, decide        │
-│    ↓                                                    │
-│  schema.py              ← enum/type validation          │
-│    ↓                                                    │
-│  verifier/               ← Z3 policy check             │
-│    ├── tahoe_policy.py   ← price ≥ floor_price(model) │
-│    └── deletion_policy.py ← target ∈ allowed_scope    │
-│    ↓ UNSAT / SAT + model                               │
-│  [permit] / [block + counterexample]                   │
-└─────────────────────────────────────────────────────┘
-         ↑
-  bridge/                  ← Lean theorem → Z3 encoding
-  Lean/Policy.lean         ← Ground-truth policy theorems
-```
+183 tests covering all modules.
 
 ## Project Structure
 
 ```
-├── Lean/Policy.lean        # Ground-truth theorems (standalone, compiles with `lean`)
-├── verifier/
-│   ├── tahoe_policy.py     # Z3 encoding: price floor
-│   ├── deletion_policy.py  # Z3 encoding: file scope
-│   └── verifier.py         # Generic dispatcher
-├── bridge/
-│   ├── policy_spec.py      # Lean-mirroring type system (Nat→Int, Finset→Function)
-│   └── z3_encoder.py       # Policy spec → Z3 constraints
-├── llm/
-│   ├── groq_client.py      # Groq API wrapper (mocked when no key)
-│   └── prompts.py          # System prompts for tool-calling
-├── orchestrator.py         # Parse LLM output, route to Z3, return decision
-├── config.py               # Config — loads from .env if python-dotenv installed
-├── demo*.py                # Demo scripts (zero-config, no API key needed)
-└── tests/                  # 102 tests — run with `python -m pytest tests/`
+├── cli/                    # CLI commands + auto-generator + round-trip
+├── bridge/                 # PolicySpec type system + Z3 encoder
+├── verifier/               # Policy checkers + coordination verifier
+├── policy_store/           # Versioned store + audit trail
+├── dashboard/              # Streamlit monitoring UI
+├── integrations/           # LangChain, CrewAI, AutoGen wrappers
+├── Lean/Policy.lean        # Ground-truth theorems
+├── Makefile                # test, verify, demo, dashboard targets
+└── tests/                  # 183 tests — run with `make test`
 ```
 
-## Adding a New Policy
+## Fail-Closed Design
 
-1. **Lean theorem** → `Lean/Policy.lean`
-2. **Z3 check** → `verifier/<name>.py`
-3. **Route** → `config.py` `POLICY_ROUTES`
-4. **Tests** → `tests/test_<name>.py`
+Unknown inputs are rejected at every layer:
 
-## Commit History
+| Layer | Unknown Behavior |
+|---|---|
+| Schema validation | Rejected — out-of-enum |
+| Z3 policy check | Rejected — ForAll default-false |
+| Lean theorem | Unprovable — `Option Nat` returns `none` |
+| Coordination verifier | Rejected — unregistered agents |
 
-| Phase | Description | Tests |
-|---|---|---|
-| 1 | Tahoe arithmetic policy | 25 |
-| 2 | File deletion frame policy | 18 |
-| 3 | Orchestrator + tool intercept | 20 |
-| 4 | Lean → Z3 bridge | 19 |
-| 5 | Groq LLM integration + e2e | 20 |
-| 6 | Docs, CI, polish | — |
-| 7 | Schema validation + fail-closed Option Nat | 18 |
+## Architecture
+
+```
+LLM output → Interceptor → Schema validation → Z3 check → Coordinator → [block/permit]
+                                                                 ↓
+                                                          Policy Store (versioned)
+                                                                 ↓
+                                                          Audit Trail (JSONL)
+```

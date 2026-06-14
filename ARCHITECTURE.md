@@ -2,92 +2,112 @@
 
 ## System Design
 
-The verifier is structured as a layered pipeline. Each layer has a single responsibility, and data flows in one direction — from the LLM output to a block/permit decision.
-
 ```
-Layer 1: Interface      (orchestrator.py)
-Layer 2: Routing        (verifier/verifier.py)
-Layer 3: Policy Check   (verifier/tahoe_policy.py, verifier/deletion_policy.py)
-Layer 4: Theorem Spec   (bridge/ — automated encoding from Lean types)
-Layer 5: Ground Truth   (Lean/Policy.lean)
+┌─────────────────────────────────────────────────────────┐
+│  CLI (veritool)                                         │
+│  ┌──────────┐ ┌────────────┐ ┌───────────┐             │
+│  │ create   │ │ check/test │ │ hot-reload│             │
+│  ├──────────┤ ├────────────┤ ├───────────┤             │
+│  │ run      │ │ status     │ │ rollback  │             │
+│  ├──────────┤ ├────────────┤ ├───────────┤             │
+│  │ verify   │ │ dashboard  │ │ wrap      │             │
+│  └──────────┘ └────────────┘ └───────────┘             │
+└──────────────────────┬──────────────────────────────────┘
+                       │
+┌──────────────────────▼──────────────────────────────────┐
+│  Bridge                                                │
+│  ┌───────────────┐  ┌──────────────────────────────┐   │
+│  │ PolicySpec    │  │ z3_encoder                   │   │
+│  │ (type system) │  │ ├─ compile_policy(spec)→Z3  │   │
+│  │ Nat→Int       │  │ └─ check_policy(spec,params)│   │
+│  │ Finset→Fn     │  │    → {permitted/violation}  │   │
+│  └───────────────┘  └──────────────────────────────┘   │
+└──────────────────────┬──────────────────────────────────┘
+                       │
+┌──────────────────────▼──────────────────────────────────┐
+│  Verifier                                              │
+│  ┌──────────────────┐  ┌──────────────────────────┐    │
+│  │ Policy Checkers  │  │ CoordinationVerifier     │    │
+│  │ (7 policy types) │  │ ├─ SEQUENTIAL_ACCESS     │    │
+│  └──────────────────┘  │ ├─ LOCK_REQUIRED         │    │
+│                        │ ├─ APPROVAL_REQUIRED     │    │
+│                        │ ├─ MONOTONIC_ACCESS      │    │
+│                        │ └─ ROLE_BASED_ACCESS     │    │
+│                        └──────────────────────────┘    │
+└──────────────────────┬──────────────────────────────────┘
+                       │
+┌──────────────────────▼──────────────────────────────────┐
+│  Policy Store + Audit                                   │
+│  ┌────────────────┐  ┌──────────────────────────┐      │
+│  │ VersionedStore │  │ AuditTrail               │      │
+│  │ ├─ hot-reload  │  │ ├─ JSONL logging         │      │
+│  │ ├─ rollback    │  │ ├─ query/filter          │      │
+│  │ └─ manifest    │  │ ├─ stats                 │      │
+│  │                │  │ └─ CSV export            │      │
+│  └────────────────┘  └──────────────────────────┘      │
+└──────────────────────┬──────────────────────────────────┘
+                       │
+┌──────────────────────▼──────────────────────────────────┐
+│  Integrations + Dashboard                               │
+│  ┌──────────┐ ┌─────────┐ ┌──────────┐ ┌──────────┐   │
+│  │LangChain │ │CrewAI   │ │AutoGen   │ │Streamlit │   │
+│  │Interceptor│ │Guard    │ │Middleware│ │Dashboard │   │
+│  └──────────┘ └─────────┘ └──────────┘ └──────────┘   │
+└─────────────────────────────────────────────────────────┘
 ```
 
-## Data Flow
+## Core Types (`bridge/policy_spec.py`)
 
-### 1. Orchestrator (`orchestrator.py`)
+| Type | Lean Equivalent | Z3 Sort |
+|---|---|---|
+| `NatType` | `Nat` | `IntSort()` |
+| `StringType` | `String` | `StringSort()` |
+| `BoolType` | `Bool` | `BoolSort()` |
+| `FinsetType(elem)` | `Finset elem` | `Function(ElemSort, BoolSort())` |
 
-Accepts raw JSON tool calls from LLM output. Validates structure (`tool` + `args` fields). Returns a decision dict:
+`PolicySpec` is a declarative struct: functions with mappings, param types, violation expression. The encoder compiles it to Z3 constraints; `check_policy` adds param bindings and the violation check.
 
-```python
-{
-    "decision": "blocked" | "permitted" | "unknown_tool" | "error",
-    "reason": "...",
-    "tool": "confirm_sale",
-    "args": {...}
-}
-```
+## Auto-Generator (`cli/auto_generator.py`)
 
-### 2. Verifier (`verifier/verifier.py`)
+Natural language → formal spec:
 
-Routes tool names to policy checkers via `config.py:POLICY_ROUTES`. Maintains a registry of `{route_name: check_fn}`. Each check function accepts `(**kwargs)` and returns a result dict.
+1. Parse description for keywords: "price", "file", "SQL", "rate", "role", "API", "access"
+2. Infer policy type, function names, mapping patterns from phrasing
+3. Generate `PolicySpec` + Lean theorem stub + Z3 checker + test file
+4. Run round-trip verification on generated test matrix
 
-### 3. Policy Checkers
+## Coordination Verifier (`verifier/coordination_policy.py`)
 
-Each policy checker:
-1. Creates a Z3 solver
-2. Encodes the policy as constraints
-3. Asserts the violation condition
-4. Returns SAT (violation) or UNSAT (safe)
+Tracks agent actions and checks invariants in a sequence-orientated model:
 
-**Tahoe policy** (`verifier/tahoe_policy.py`):
-```
-floor_price: String → Nat
-violation ← price < floor_price(model)
-```
+- **SEQUENTIAL**: no two agents access the same resource concurrently
+- **LOCK**: a lock must be held before accessing a resource
+- **APPROVAL**: sensitive actions require a prior approval action
+- **MONOTONIC**: state values can only increase
+- **ROLE**: only designated roles may access a resource
 
-**Deletion policy** (`verifier/deletion_policy.py`):
-```
-in_scope: String → Bool
-violation ← target not in scope
-```
+Uses Python-level tracking (not Z3) to avoid false positives from uninterpreted functions.
 
-### 4. Bridge (`bridge/`)
+## Policy Store (`policy_store/store.py`)
 
-Maps Lean 4 types to Z3 sorts:
+Versioned by policy name. Each version stores the serialized spec + timestamp. Hot-reload watches for manifest changes. Rollback restores the previous version and resets the hot-reload watcher.
 
-| Lean Type | Z3 Sort |
-|---|---|
-| `Nat` | `IntSort()` with `>= 0` |
-| `String` | `StringSort()` |
-| `Bool` | `BoolSort()` |
-| `Finset String` | `Function(StringSort(), BoolSort())` |
+## Audit Trail (`policy_store/audit.py`)
 
-Policy specs (`PolicySpec`) describe a policy declaratively. The encoder (`z3_encoder.py`) compiles specs to Z3 constraints.
+Every check is logged as JSONL. Queryable by policy, decision, time range. Exportable to CSV.
 
-### 5. Ground Truth (`Lean/Policy.lean`)
+## Integrations
 
-The Lean theorem is the authoritative policy statement. Z3 must agree with it. The bridge ensures agreement by generating Z3 encoding from the same structure.
+All three wrappers follow the same pattern: intercept tool calls → call `bridge_check` → permit or block with counterexample.
 
-## Key Design Decisions
-
-### Fail-Closed
-
-If Z3 times out or returns `unknown`, the tool call is **blocked**. Safety-critical systems must default to blocking.
-
-### Path Normalization
-
-File paths are normalized (`os.path.normpath`) before Z3 checking. This prevents `../../etc/shadow` style escapes.
-
-### Policy Functions Accept `**kwargs`
-
-Policy checkers accept `**kwargs` to ignore LLM-provided arguments that aren't part of the policy check (e.g., `customer` name in a sale).
+- **LangChain**: wraps tool executors via `__call__`
+- **CrewAI**: wraps tool instances via `__call__`
+- **AutoGen**: wraps tool schemas via `register_for_llm`
 
 ## Adding a New Policy
 
-1. Write a Lean theorem in `Lean/Policy.lean`
-2. Create `verifier/<policy>.py` with a check function
-3. Add route in `config.py:POLICY_ROUTES`
-4. Add bridge spec in `bridge/__init__.py` (optional)
-5. Add tests in `tests/test_<policy>.py`
+1. Add `PolicySpec` in `bridge/__init__.py` — no `verifier/*.py` file needed
+2. Policy type routing is automatic via `_policy_type` field
+3. Tests use `bridge_check` for all policy types
 
-The Lean theorem and Z3 encoding must agree on all inputs. The bridge round-trip tests enforce this.
+The bridge is the single path. No separate hand-written Z3 checkers.
