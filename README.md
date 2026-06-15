@@ -1,6 +1,6 @@
 # VeriTool
 
-Formal verification framework for LLM tool-calling. Z3 + Lean 4.
+Z3 + Lean 4 formal verification framework for LLM tool-calling.
 
 ```
 LLM → Interceptor → Z3 Policy Check → UNSAT = permit | SAT = block + counterexample
@@ -50,6 +50,17 @@ python demo_deletion.py    # file scope checks
 | `role_hours` | Admin action time windows | `role=admin ∧ hour > 22` |
 | `api_access` | Endpoint allowlist | `¬endpoint_allowed(path)` |
 | `generic` | Custom constraints | user-defined |
+
+## Lean 4 Ground Truth
+
+Policies are dual-encoded: Z3 for runtime checks, Lean 4 theorems (`Lean/Policy.lean`) as the authoritative spec. The Lean theorem uses `Option Nat` — unknown inputs return `none`, making violations structurally unprovable. Any discrepancy between Z3 and Lean is caught by round-trip tests.
+
+```lean
+def floor_price : String → Option Nat
+  | "Tahoe"  => some 45000
+  | "Malibu" => some 25000
+  | _        => none     -- unknown model: structurally unprovable
+```
 
 ## Multi-Agent Coordination
 
