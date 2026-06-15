@@ -18,7 +18,6 @@ class Verifier:
     resource_extractors: dict[str, Callable] = field(default_factory=dict)
     agent_name: str = "default"
     trace: list[Action] = field(default_factory=list)
-    state: dict[str, Any] = field(default_factory=dict)
 
     def register_tool(self, tool_name: str, action_type: str, resource_fn: Callable | None = None):
         self.action_type_map[tool_name] = action_type
@@ -49,22 +48,14 @@ class Verifier:
                 timestamp=time.time(),
             )
 
-            result = check_all(self.trace, action, self.invariants, self.state)
+            result = check_all(self.trace, action, self.invariants)
             if result["status"] == "violation":
                 return {"status": "blocked", "reason": result.get("reason", ""), "witness": result.get("witness", {})}
 
             self.trace.append(action)
-            self._update_state(action)
             return fn(**kwargs)
 
         return guarded
 
-    def _update_state(self, action: Action):
-        monotonic_key = f"monotonic:{action.agent}:{action.resource or action.tool}"
-        val = action.args.get("value")
-        if val is not None and isinstance(val, (int, float)):
-            self.state[monotonic_key] = val
-
     def reset(self):
         self.trace.clear()
-        self.state.clear()
