@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "veritool"
-version = "1.0.0"
+version = "1.0.1"
 description = "Formal verification framework for LLM tool-calling. Z3 + Lean 4."
 readme = "README.md"
 license = "Apache-2.0"
