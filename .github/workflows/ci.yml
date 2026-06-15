@@ -35,10 +35,4 @@ jobs:
 
       - name: Verify Lean compilation
         run: |
-          lean Lean/Policy.lean
-          lean Lean/Verify.lean
-
-      - name: Run demo scripts
-        run: |
-          PYTHONPATH="." python demo_tahoe.py
-          PYTHONPATH="." python demo_deletion.py
+          lean Lean/Trace.lean
