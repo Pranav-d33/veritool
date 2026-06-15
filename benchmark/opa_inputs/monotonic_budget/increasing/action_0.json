@@ -1,0 +1,8 @@
+{
+  "agent": "alice",
+  "tool": "spend",
+  "action": "SPEND",
+  "kwargs": {
+    "value": 10
+  }
+}

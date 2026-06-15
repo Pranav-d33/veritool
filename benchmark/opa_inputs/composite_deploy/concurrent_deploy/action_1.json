@@ -1,0 +1,6 @@
+{
+  "agent": "ci",
+  "tool": "test",
+  "action": "TEST",
+  "kwargs": {}
+}

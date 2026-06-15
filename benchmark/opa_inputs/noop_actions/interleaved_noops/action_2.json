@@ -1,0 +1,6 @@
+{
+  "agent": "any",
+  "tool": "notify",
+  "action": "NOTIFY",
+  "kwargs": {}
+}

@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "veritool"
 version = "1.0.1"
-description = "Formal verification framework for LLM tool-calling. Z3 + Lean 4."
+description = "Runtime trace invariant verification for multi-agent LLM systems. Z3 + Lean 4."
 readme = "README.md"
 license = "Apache-2.0"
 requires-python = ">=3.11"
@@ -14,15 +14,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-groq = ["groq>=0.12"]
-dashboard = ["streamlit>=1.28", "pandas>=2.0"]
-dev = [
-    "pytest>=8",
-    "pyfakefs>=6",
-    "veritool[groq]",
-    "veritool[dashboard]",
-]
-all = ["veritool[dev]"]
+dev = ["pytest>=8"]
 
 [project.urls]
 Homepage = "https://github.com/Pranav-d33/z3-lean-4-static-verifier-for-LLM-tool-calling"
@@ -36,9 +28,6 @@ include = [
     "cli", "cli.*",
     "verifier", "verifier.*",
     "policy_store", "policy_store.*",
-    "dashboard", "dashboard.*",
-    "integrations", "integrations.*",
-    "llm", "llm.*",
 ]
 exclude = ["bridge.generated_specs"]
 

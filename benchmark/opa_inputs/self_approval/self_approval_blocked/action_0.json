@@ -1,0 +1,6 @@
+{
+  "agent": "ci",
+  "tool": "approve_deploy",
+  "action": "APPROVE",
+  "kwargs": {}
+}

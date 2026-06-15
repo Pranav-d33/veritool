@@ -1,0 +1,6 @@
+{
+  "agent": "ci",
+  "tool": "deploy",
+  "action": "DEPLOY",
+  "kwargs": {}
+}

@@ -1,0 +1,6 @@
+{
+  "agent": "any",
+  "tool": "log",
+  "action": "LOG",
+  "kwargs": {}
+}

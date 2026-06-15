@@ -1,0 +1,6 @@
+{
+  "agent": "any",
+  "tool": "ping",
+  "action": "PING",
+  "kwargs": {}
+}

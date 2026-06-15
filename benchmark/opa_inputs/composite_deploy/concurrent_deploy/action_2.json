@@ -1,0 +1,8 @@
+{
+  "agent": "alice",
+  "tool": "deploy",
+  "action": "DEPLOY",
+  "kwargs": {
+    "env": "prod"
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "agent": "alice",
+  "tool": "write",
+  "action": "WRITE",
+  "kwargs": {
+    "file": "a.txt"
+  }
+}

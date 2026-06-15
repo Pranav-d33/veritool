@@ -1,4 +1,4 @@
-.PHONY: test verify demo clean install cli dashboard
+.PHONY: test verify benchmark compare all clean install
 
 PYTHON = python3
 PYTEST = PYTHONPATH="." $(PYTHON) -m pytest
@@ -6,26 +6,16 @@ PYTEST = PYTHONPATH="." $(PYTHON) -m pytest
 test:
 	$(PYTEST) tests/ -v --tb=short
 
-test-all:
-	$(PYTEST) tests/ -v
-
 verify:
-	lean Lean/Policy.lean
-	lean Lean/Verify.lean
-	$(PYTHON) -c "import subprocess; r = subprocess.run(['lean', 'Lean/Invalid.lean'], capture_output=True); assert r.returncode != 0, 'Invalid.lean should fail'; print('Invalid.lean correctly rejected')"
+	lean Lean/Trace.lean
 
-demo:
-	PYTHONPATH="." $(PYTHON) demo_tahoe.py
-	PYTHONPATH="." $(PYTHON) demo_deletion.py
+benchmark:
+	$(PYTHON) -m benchmark.report
 
-llm-demo:
-	$(PYTHON) demo.py
+all: verify test benchmark compare
 
-cli:
-	PYTHONPATH="." $(PYTHON) -m cli --help
-
-dashboard:
-	streamlit run dashboard/app.py --server.port=8501
+compare:
+	PYTHONPATH="." $(PYTHON) -m benchmark.compare
 
 install:
 	pip install -e ".[dev]"
@@ -34,7 +24,3 @@ clean:
 	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
 	find . -type f -name '*.pyc' -delete
 	find Lean -type f -name '*.olean' -delete
-
-.PHONY: test-fast
-test-fast:
-	$(PYTEST) tests/ -x -q --tb=short

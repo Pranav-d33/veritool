@@ -1,50 +1,70 @@
-from verifier.tahoe_policy import check_sale
-from verifier.deletion_policy import check_deletion
-from verifier.schema import validate_tool_call, ValidationError
+import time
+from dataclasses import dataclass, field
+from typing import Any, Callable
+
+from bridge.trace import Action
+from bridge.invariant import (
+    OrderingInvariant, ExclusiveAccessInvariant,
+    ApprovalInvariant, MonotonicInvariant,
+)
+from bridge.z3_encoder import check_all
 from config import VERIFICATION_TIMEOUT_MS
 
 
+@dataclass
 class Verifier:
-    def __init__(self):
-        self._policies: dict[str, callable] = {
-            "tahoe": check_sale,
-            "deletion": check_deletion,
-        }
+    invariants: list = field(default_factory=list)
+    action_type_map: dict[str, str] = field(default_factory=dict)
+    resource_extractors: dict[str, Callable] = field(default_factory=dict)
+    agent_name: str = "default"
+    trace: list[Action] = field(default_factory=list)
+    state: dict[str, Any] = field(default_factory=dict)
 
-    def check(self, tool_name: str, args: dict) -> dict:
-        route = self._resolve_route(tool_name)
-        if route is None:
-            return {"status": "unknown_tool", "reason": f"No policy for tool: {tool_name}"}
+    def register_tool(self, tool_name: str, action_type: str, resource_fn: Callable | None = None):
+        self.action_type_map[tool_name] = action_type
+        if resource_fn:
+            self.resource_extractors[tool_name] = resource_fn
 
-        try:
-            validated_args = validate_tool_call(tool_name, args)
-        except ValidationError as e:
-            return {"status": "error", "reason": str(e)}
+    def add_invariant(self, inv):
+        self.invariants.append(inv)
 
-        check_fn = self._policies[route]
-        try:
-            result = check_fn(**validated_args, timeout_ms=VERIFICATION_TIMEOUT_MS)
-        except TypeError as e:
-            return {"status": "error", "reason": f"Argument mismatch: {e}"}
-        except Exception as e:
-            return {"status": "error", "reason": str(e)}
+    def wrap(self, fn: Callable, tool_name: str | None = None):
+        import functools
+        tn = tool_name or fn.__name__
 
-        return self._normalize(result)
+        @functools.wraps(fn)
+        def guarded(**kwargs):
+            action_type = self.action_type_map.get(tn, tn)
+            resource = None
+            extractor = self.resource_extractors.get(tn)
+            if extractor:
+                resource = extractor(kwargs)
 
-    def _resolve_route(self, tool_name: str) -> str | None:
-        from config import POLICY_ROUTES
-        return POLICY_ROUTES.get(tool_name)
+            action = Action(
+                agent=self.agent_name,
+                tool=tn,
+                action_type=action_type,
+                args=kwargs,
+                resource=resource,
+                timestamp=time.time(),
+            )
 
-    @staticmethod
-    def _normalize(result: dict) -> dict:
-        mapping = {
-            "violation": "blocked",
-            "permitted": "permitted",
-            "unknown": "unknown",
-            "unknown_model": "blocked",
-        }
-        decision = mapping.get(result["status"], "error")
-        return {
-            "decision": decision,
-            "reason": result.get("reason", result.get("witness", {})),
-        }
+            result = check_all(self.trace, action, self.invariants, self.state)
+            if result["status"] == "violation":
+                return {"status": "blocked", "reason": result.get("reason", ""), "witness": result.get("witness", {})}
+
+            self.trace.append(action)
+            self._update_state(action)
+            return fn(**kwargs)
+
+        return guarded
+
+    def _update_state(self, action: Action):
+        monotonic_key = f"monotonic:{action.agent}:{action.resource or action.tool}"
+        val = action.args.get("value")
+        if val is not None and isinstance(val, (int, float)):
+            self.state[monotonic_key] = val
+
+    def reset(self):
+        self.trace.clear()
+        self.state.clear()

@@ -1,0 +1,6 @@
+{
+  "agent": "qa",
+  "tool": "approve",
+  "action": "APPROVE",
+  "kwargs": {}
+}

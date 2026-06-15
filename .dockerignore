@@ -1,0 +1,7 @@
+__pycache__
+.pytest_cache
+*.pyc
+.olean
+.git
+benchmark/opa_inputs
+benchmark/opa_outputs
