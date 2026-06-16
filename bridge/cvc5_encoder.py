@@ -1,5 +1,4 @@
-from z3 import Solver, Bool, And, Or, Not, String, StringVal, Real, sat
-
+import cvc5
 from bridge.trace import Action
 from bridge.invariant import (
     OrderingInvariant, ExclusiveAccessInvariant,
@@ -11,28 +10,58 @@ def _maybe_skip(current: Action, action_type: str) -> bool:
     return current.action_type != action_type
 
 
+def _boolean(tm: cvc5.TermManager, name: str):
+    return tm.mkConst(tm.getBooleanSort(), name)
+
+
+def _real(tm: cvc5.TermManager, name: str):
+    return tm.mkConst(tm.getRealSort(), name)
+
+
+def _mk_and(tm: cvc5.TermManager, terms: list):
+    if not terms:
+        return tm.mkTrue()
+    result = terms[0]
+    for t in terms[1:]:
+        result = tm.mkTerm(cvc5.Kind.AND, result, t)
+    return result
+
+
+def _mk_or(tm: cvc5.TermManager, terms: list):
+    if not terms:
+        return tm.mkFalse()
+    result = terms[0]
+    for t in terms[1:]:
+        result = tm.mkTerm(cvc5.Kind.OR, result, t)
+    return result
+
+
 def check_ordering(trace: list[Action], current: Action, inv: OrderingInvariant) -> dict:
     if _maybe_skip(current, inv.before_type):
         return {"status": "permitted"}
 
-    s = Solver()
     missing = []
     for p in inv.required_types:
         val = any(a.action_type == p for a in trace)
         if not val:
             missing.append(p)
 
+    tm = cvc5.TermManager()
+    solver = cvc5.Solver(tm)
+
     if inv.require_all:
         if not missing:
             return {"status": "permitted"}
-        s.add(And([Not(Bool(f"prereq_{p}")) for p in missing]))
+        terms = [tm.mkTerm(cvc5.Kind.NOT, _boolean(tm, f"prereq_{p}")) for p in missing]
+        solver.assertFormula(_mk_and(tm, terms))
     else:
         present = [p for p in inv.required_types if p not in missing]
         if present:
             return {"status": "permitted"}
-        s.add(And([Not(Bool(f"prereq_{p}")) for p in missing]))
+        terms = [tm.mkTerm(cvc5.Kind.NOT, _boolean(tm, f"prereq_{p}")) for p in missing]
+        solver.assertFormula(_mk_and(tm, terms))
 
-    if s.check() == sat:
+    if solver.checkSat().isSat():
         return {
             "status": "violation",
             "reason": f"Action '{current.action_type}' by '{current.agent}' requires prior {' ∧ '.join(inv.required_types) if inv.require_all else ' ∨ '.join(inv.required_types)} — missing: {missing}",
@@ -45,16 +74,20 @@ def check_exclusive_access(trace: list[Action], current: Action, inv: ExclusiveA
     if _maybe_skip(current, inv.action_type) or not current.resource:
         return {"status": "permitted"}
 
-    s = Solver()
-    has_conflict = Bool("has_conflict")
-    val = any(
+    tm = cvc5.TermManager()
+    solver = cvc5.Solver(tm)
+
+    has_conflict_bool = _boolean(tm, "has_conflict")
+    has_conflict = any(
         a.action_type == inv.action_type and a.resource == current.resource and a.agent != current.agent
         for a in trace
     )
-    s.add(has_conflict == val)
-    s.add(has_conflict)
 
-    if s.check() == sat:
+    solver.assertFormula(tm.mkTerm(cvc5.Kind.EQUAL, has_conflict_bool,
+                         tm.mkTrue() if has_conflict else tm.mkFalse()))
+    solver.assertFormula(has_conflict_bool)
+
+    if solver.checkSat().isSat():
         return {
             "status": "violation",
             "reason": f"Resource '{current.resource}' is already held by another agent",
@@ -67,13 +100,16 @@ def check_approval(trace: list[Action], current: Action, inv: ApprovalInvariant)
     if _maybe_skip(current, inv.action_type):
         return {"status": "permitted"}
 
-    s = Solver()
-    has_approval = Bool("has_approval")
-    val = any(a.action_type == inv.approver_type and a.agent != current.agent for a in trace)
-    s.add(has_approval == val)
-    s.add(Not(has_approval))
+    tm = cvc5.TermManager()
+    solver = cvc5.Solver(tm)
 
-    if s.check() == sat:
+    has_approval = tm.mkTerm(cvc5.Kind.NOT, _boolean(tm, "has_approval"))
+    val = any(a.action_type == inv.approver_type and a.agent != current.agent for a in trace)
+    if val:
+        return {"status": "permitted"}
+    solver.assertFormula(has_approval)
+
+    if solver.checkSat().isSat():
         return {
             "status": "violation",
             "reason": f"Action '{current.action_type}' by '{current.agent}' requires prior approval by a different agent",
@@ -90,10 +126,6 @@ def check_monotonic(trace: list[Action], current: Action, inv: MonotonicInvarian
     if val is None or not isinstance(val, (int, float)):
         return {"status": "permitted"}
 
-    s = Solver()
-    cur_val = Real("cur_val")
-    s.add(cur_val == val)
-
     prior_values = [a.args.get(inv.resource_key) for a in trace
                     if a.action_type == inv.action_type and a.agent == current.agent]
     prior_values = [v for v in prior_values if v is not None and isinstance(v, (int, float))]
@@ -102,11 +134,18 @@ def check_monotonic(trace: list[Action], current: Action, inv: MonotonicInvarian
         return {"status": "permitted"}
 
     max_prior = max(prior_values)
-    max_sym = Real("max_prior")
-    s.add(max_sym == max_prior)
-    s.add(max_sym > cur_val)
 
-    if s.check() == sat:
+    tm = cvc5.TermManager()
+    solver = cvc5.Solver(tm)
+
+    cur_val = _real(tm, "cur_val")
+    max_sym = _real(tm, "max_prior")
+
+    solver.assertFormula(tm.mkTerm(cvc5.Kind.EQUAL, cur_val, tm.mkReal(val)))
+    solver.assertFormula(tm.mkTerm(cvc5.Kind.EQUAL, max_sym, tm.mkReal(max_prior)))
+    solver.assertFormula(tm.mkTerm(cvc5.Kind.GT, max_sym, cur_val))
+
+    if solver.checkSat().isSat():
         return {
             "status": "violation",
             "reason": f"Monotonic value decreased: prior max {max_prior} → {val}",

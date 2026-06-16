@@ -7,6 +7,7 @@ structure Action where
   tool : String
   actionType : String
   resource : Option String := none
+  value : Nat := 0
 deriving Repr
 
 def has_type_in (trace : List Action) (t : String) : Prop :=
@@ -121,3 +122,54 @@ theorem approval_invariant_snoc (trace : List Action) (x : Action) (target : Str
     rcases hcase with (hneq | ⟨b, hb, hbtype, hbne⟩)
     · exact False.elim (hneq htype)
     · refine ⟨b, (List.mem_append (s := trace) (t := singleton)).mpr (Or.inl hb), hbtype, hbne⟩
+
+def monotonic_invariant (trace : List Action) (target : String) : Prop :=
+  match trace with
+  | [] => True
+  | x :: xs =>
+    ((x.actionType ≠ target) ∨ (∀ a ∈ xs, a.actionType = target → a.agent = x.agent → x.value ≤ a.value))
+    ∧ monotonic_invariant xs target
+
+theorem monotonic_invariant_nil (target : String) : monotonic_invariant [] target := by
+  simp [monotonic_invariant]
+
+theorem monotonic_invariant_snoc (trace : List Action) (x : Action) (target : String) :
+    monotonic_invariant trace target →
+    (x.actionType ≠ target ∨ ∀ a ∈ trace, a.actionType = target → a.agent = x.agent → a.value ≤ x.value) →
+    monotonic_invariant (trace ++ [x]) target := by
+  intro h hcase
+  induction trace with
+  | nil =>
+    simp [monotonic_invariant]
+  | cons y ys ih =>
+    have h_hd_or : (y.actionType ≠ target ∨ (∀ a ∈ ys, a.actionType = target → a.agent = y.agent → y.value ≤ a.value)) :=
+      h.left
+    have h_tl_rest : monotonic_invariant ys target := h.right
+    have h_cond_ys : (x.actionType ≠ target ∨ ∀ a ∈ ys, a.actionType = target → a.agent = x.agent → a.value ≤ x.value) := by
+      rcases hcase with (hneq | hall)
+      · left; exact hneq
+      · right
+        intro a ha ha_type ha_agent
+        apply hall a (List.mem_cons_of_mem y ha) ha_type ha_agent
+    have h_rest : monotonic_invariant (ys ++ [x]) target := ih h_tl_rest h_cond_ys
+    have h_first : (y.actionType ≠ target ∨ (∀ a ∈ (ys ++ [x]), a.actionType = target → a.agent = y.agent → y.value ≤ a.value)) := by
+      match h_hd_or with
+      | Or.inl h_neq =>
+        exact Or.inl h_neq
+      | Or.inr h_all =>
+        by_cases hy_type_eq : y.actionType = target
+        · refine Or.inr ?_
+          intro a ha ha_type ha_agent
+          rcases (List.mem_append.mp ha) with (ha_ys | ha_x)
+          · exact h_all a ha_ys ha_type ha_agent
+          · have ha_eq : a = x := by simpa using ha_x
+            have a_type_x : x.actionType = target := ha_eq ▸ ha_type
+            have a_agent_symm : y.agent = x.agent := by
+              simpa [ha_eq] using ha_agent.symm
+            rcases hcase with (hneq | hall)
+            · exact (hneq a_type_x).elim
+            · have hy_mem : y ∈ (y :: ys) := by simp
+              rw [ha_eq]
+              exact hall y hy_mem hy_type_eq a_agent_symm
+        · exact Or.inl hy_type_eq
+    exact And.intro h_first h_rest

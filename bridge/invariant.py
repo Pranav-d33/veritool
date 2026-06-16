@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 class OrderingInvariant:
     before_type: str
     required_types: list[str]
+    require_all: bool = True
 
     def __post_init__(self):
         assert self.required_types, "must require at least one prior action type"
